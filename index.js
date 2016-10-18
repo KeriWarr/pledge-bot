@@ -2,7 +2,7 @@ var botstrap = require('botstrap');
 var http = require('http');
 
 var bot = botstrap({
-  token: "",
+  token: process.env.TOKEN,
 });
 
 var options = {
