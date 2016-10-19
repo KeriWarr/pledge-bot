@@ -4,8 +4,8 @@
   "description": "A slack bot for making wagers with your friends",
   "main": "index.js",
   "scripts": {
-    "build": "babel index.js > run.js",
-    "run": "node run.js",
+    "build": "babel src --out-dir compiled",
+    "run": "node index.js",
     "start": "npm run build; npm run run"
   },
   "repository": {
@@ -28,6 +28,7 @@
     "babel-cli": "^6.16.0",
     "babel-preset-es2015": "^6.16.0",
     "botstrap": "^0.15.4",
-    "lodash": "^4.16.4"
+    "lodash": "^4.16.4",
+    "node-fetch": "^1.6.3"
   }
 }
