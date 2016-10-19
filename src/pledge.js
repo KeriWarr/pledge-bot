@@ -1,4 +1,18 @@
 import fetch from 'node-fetch';
+import winston from 'winston';
+const logger = new (winston.Logger)({
+  transports: [
+    new (winston.transports.Console)({
+      timestamp: true,
+      colorize: true,
+    }),
+    new (winston.transports.File)({
+      level: 'debug',
+      filename: 'server.log',
+      json: false,
+    }),
+  ],
+});
 
 
 const BOT_NAME = 'pledge';
@@ -32,13 +46,15 @@ export default function pledge(message, users, response) {
   const user = users[userId];
   const fullName = user.real_name;
 
-  let reply;
+  if (fullName === 'Shiro Neko') {
+    return response.end("fuck off");
+  }
 
   switch (command) {
     case '-w':
     case 'wagers':
     case 'all':
-      reply = handleList();
+      handleList(response);
       break;
     case '-l':
     case 'available':
@@ -48,11 +64,11 @@ export default function pledge(message, users, response) {
     case '-s':
     case 'get':
     case 'show':
-      reply = handleShow(argString);
+      handleShow(response, argString);
       break;
     case '-a':
     case 'accept':
-      reply = handleAccept(argString, fullName);
+      handleAccept(response, argString, fullName);
       break;
     case '-r':
     case 'reject':
@@ -108,17 +124,15 @@ export default function pledge(message, users, response) {
     default:
 
   }
-
-  response.end(reply);
 }
 
-function handleList() {
-  fetch(API_ROOT + WAGERS_PATH).then(fetchResponse => fetchResponse.text()).then(body => {
+function handleList(res) {
+  return fetch(API_ROOT + WAGERS_PATH).then(fetchResponse => fetchResponse.text()).then(body => {
     let text = JSON.parse(body).reduce(
       (p, n) => (p + getWagerDescription(n)),
       ''
     );
-    return text;
+    res.end(text);
   });
 }
 
@@ -128,9 +142,9 @@ function handleShow(res, argList) {
   fetch(API_ROOT + WAGERS_PATH + `/${id}`).then(fetchResponse => fetchResponse.text()).then(body => {
     const desciption = getWagerDescription(JSON.parse(body));
     if (desciption) {
-      return desciption;
+      res.end(desciption);
     } else {
-      return 'Sorry, couldn\'t find that wager :(';
+      res.end('Sorry, couldn\'t find that wager :(');
     }
   });
 }
@@ -174,7 +188,7 @@ function stripCentsFromString(str = '') {
   return withoutPeriod;
 }
 
-function handleAccept(args, fullName) {
+function handleAccept(res, args, fullName) {
   const id = getIdFromArg(args[0]);
 
   const body = { operation: {
@@ -190,9 +204,9 @@ function handleAccept(args, fullName) {
       'Content-Type': 'application/json',
     }
   }).then(response => {
-    return 'You\'ve accepted the wager!';
+    res.end('You\'ve accepted the wager!');
   }, error => {
-    return 'The backed didn\'t like that request. You should apologize';
+    res.end('The backed didn\'t like that request. You should apologize');
   });
 }
 
