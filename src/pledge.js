@@ -38,9 +38,12 @@ const ERRORS = {
   nonExistentUser: 'That user is not in this team.',
   noResults: kind => `I couldn't find any${kind ? ` ${kind}` : ''} wagers.`,
   malformedPledge: 'Sorry, I couldn\'t understand that pledge.',
+  proposeFailure: 'Sorry, the backend didn\'t like that wager',
+  invalidCommand: 'That is not a valid command.',
 };
 const MESSAGES = {
   operationSuccess: kind => `You've ${pastTenseify(kind)} the wager!`,
+  proposeSuccess: 'You\'ve created a wager!',
 };
 
 const stripZeroCents = str => str && str.replace(CENTS_REGEX, '');
@@ -371,6 +374,14 @@ export default function pledge(message, users, response) {
       sendReply('Hahaha. did you think I would document this shit?\nAsk me again tomorrow.');
       break;
     default:
+      if (command[0] === '@') {
+        sendReply(ERRORS.nonExistentUser);
+        return;
+      }
+      if (!command.match(USER_ID_REGEX)) {
+        sendReply(ERRORS.invalidCommand);
+        return;
+      }
       handleDefault({
         sendReply,
         fullName,
