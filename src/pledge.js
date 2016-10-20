@@ -9,7 +9,7 @@ const OPERATIONS_PATH = '/operations';
 const WAGERS_PATH = '/wagers';
 
 const ID_REGEX = /^\d+$/;
-const MESSAGE_REGEX = /^(?:I )?pledge (.+)$/i;
+const MESSAGE_REGEX = /^(?:I )?(?:@?pledge|<@U1V3QU2BU>) (.+)$/i;
 // The second option is actually a unicode double dash
 const OPTION_REGEX = /^(--|—)/;
 const CENTS_REGEX = /\.0+$/;
@@ -75,9 +75,46 @@ const getOfferDescription = ({ description, amount, currency }) => {
     : `${bold(stripZeroCents(amount))}${currencyDisplay}`;
 };
 
+const untagWord = ({ word }) => {
+  logger.error(word);
+  const homoglyphReplacements = [
+    //mbasically identical replacements
+    [',', '\u201A'], ['-', '\u2010'], [';', '\u037E'], ['A', '\u0391'], ['B', '\u0392'],
+    ['C', '\u0421'], ['D', '\u216E'], ['E', '\u0395'], ['H', '\u0397'], ['I', '\u0399'],
+    ['J', '\u0408'], ['K', '\u039A'], ['L', '\u216C'], ['M', '\u039C'], ['N', '\u039D'],
+    ['O', '\u039F'], ['P', '\u03A1'], ['S', '\u0405'], ['T', '\u03A4'], ['V', '\u2164'],
+    ['X', '\u03A7'], ['Y', '\u03A5'], ['Z', '\u0396'], ['a', '\u0430'], ['c', '\u03F2'],
+    ['d', '\u217E'], ['e', '\u0435'], ['i', '\u0456'], ['j', '\u0458'], ['l', '\u217C'],
+    ['m', '\u217F'], ['o', '\u03BF'], ['p', '\u0440'], ['s', '\u0455'], ['v', '\u03BD'],
+    ['x', '\u0445'], ['y', '\u0443'], ['\u00DF', '\u03B2'], ['\u00E4', '\u04D3'],
+    ['\u00F6', '\u04E7'], ['@', '\uFF20'], ['0', '\uFF10'], ['1', '\uFF11'],
+    // similar replacements
+    // ['/', '\u2044'], ['F', '\u03DC'], ['G', '\u050C'], ['\u00C4', '\u04D2'],
+    // ['\u00D6', '\u04E6'],
+    // // fixed width replacements
+    // ['*', '\uFF0A'], ['!', '\uFF01'], ['"', '\uFF02'], ['#', '\uFF03'], ['$', '\uFF04'],
+    // ['%', '\uFF05'], ['&', '\uFF06'], ['\'', '\uFF07'], ['(', '\uFF08'], [')', '\uFF09'],
+    // ['+', '\uFF0B'], ['.', '\uFF0E'], ['0', '\uFF10'], ['1', '\uFF11'], ['2', '\uFF12'],
+    // ['3', '\uFF13'], ['4', '\uFF14'], ['5', '\uFF15'], ['6', '\uFF16'], ['7', '\uFF17'],
+    // ['8', '\uFF18'], ['9', '\uFF19'], [':', '\uFF1A'], ['<', '\uFF1C'], ['=', '\uFF1D'],
+    // ['>', '\uFF1E'], ['?', '\uFF1F'],  ['Q', '\uFF31'], ['R', '\uFF32'],
+    // ['U', '\uFF35'], ['W', '\uFF37'], ['[', '\uFF3B'], ['\\', '\uFF3C'], [']', '\uFF3D'],
+    // ['^', '\uFF3E'], ['_', '\uFF3F'], ['`', '\uFF40'], ['b', '\uFF42'], ['f', '\uFF46'],
+    // ['g', '\uFF47'], ['h', '\uFF48'], ['k', '\uFF4B'], ['n', '\uFF4E'], ['q', '\uFF51'],
+    // ['r', '\uFF52'], ['t', '\uFF54'], ['u', '\uFF55'], ['w', '\uFF57'], ['z', '\uFF5A'],
+    // ['{', '\uFF5B'], ['|', '\uFF5C'], ['}', '\uFF5D'], ['~', '\uFF5E'],
+  ];
+  let newWord = word;
+  homoglyphReplacements.forEach((replacement) => {
+    newWord = newWord.replace(replacement[0], replacement[1]);
+  });
+  return newWord;
+};
+
 const nameToTag = ({ name, userNameMap }) => {
   const tag = (_.find(userNameMap, user => user.real_name === name) || {}).name;
-  return tag ? `@${tag}` : null;
+  // logger.info(tag, untagWord(`@${tag}`));
+  return tag ? untagWord({ word: `@${tag}` }) : null;
 };
 
 const userIdToName = ({ id, userNameMap }) => {
@@ -252,6 +289,19 @@ const handleUser = requiresUser(({ sendReply, usersName, userNameMap }) =>
         || ERRORS.noResults('of their')
     )).catch(() => sendReply(ERRORS.serverFailure)));
 
+const handleHelp = ({ sendReply }) => sendReply(
+`${pre('all')} - get all wagers
+${pre('show <id>')} - get one wager
+${pre('me')} - get your wagers
+${pre('user <tag>')} - get their wagers
+${pre('accept/reject/cancel/close/appeal <id>')} - advance the state of the wager
+${pre('listed/accepted/closed/completed/unaccepted/rejected/appealed/cancelled')} - get wagers by status
+${pre('<tag> <offer>#<offer> <outcome>')} - make a wager
+An offer consists of a dollar value, and an optional currency, or a double-quote delimited description.
+Note that your full name on slack must match your name on Splitwise in order for the Splitwise integration to work.
+There are a bunch more features such as expiration and maturation dates that I've implemented only on the backend so far - coming soon.`
+);
+
 const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName }) => {
   const args = argString && argString.split(' ').slice(1).join(' ');
   const pledgeMatches = args && args.match(PLEDGE_REGEX);
@@ -371,7 +421,7 @@ export default function pledge(message, users, response) {
     case '-h':
     case 'how':
     case 'help':
-      sendReply('Hahaha. did you think I would document this shit?\nAsk me again tomorrow.');
+      handleHelp(commandParams);
       break;
     default:
       if (command[0] === '@') {
