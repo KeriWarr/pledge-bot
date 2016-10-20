@@ -315,10 +315,10 @@ const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName 
       taker: usersName,
       maker_offer_description: pledgeMatches[1],
       maker_offer_amount: parseFloat(pledgeMatches[2]),
-      maker_offer_currency: pledgeMatches[3] || DEFAULT_CURRENCY,
+      maker_offer_currency: pledgeMatches[3] || (parseFloat(pledgeMatches[2]) && DEFAULT_CURRENCY),
       taker_offer_description: pledgeMatches[4],
       taker_offer_amount: parseFloat(pledgeMatches[5]),
-      taker_offer_currency: pledgeMatches[6] || DEFAULT_CURRENCY,
+      taker_offer_currency: pledgeMatches[6] || (parseFloat(pledgeMatches[5]) && DEFAULT_CURRENCY),
       outcome: pledgeMatches[7],
     },
   }).then(() => sendReply(MESSAGES.proposeSuccess))
