@@ -68,7 +68,7 @@ const formatCurrency = ({ currency }) => {
 };
 
 const getOfferDescription = ({ description, amount, currency }) => {
-  const formattedCurrency = formatCurrency(currency);
+  const formattedCurrency = formatCurrency({ currency });
   const currencyDisplay = formattedCurrency ? ` ${formattedCurrency}` : '';
   return description
     ? `"${description}"`
@@ -76,7 +76,6 @@ const getOfferDescription = ({ description, amount, currency }) => {
 };
 
 const untagWord = ({ word }) => {
-  logger.error(word);
   const homoglyphReplacements = [
     //mbasically identical replacements
     [',', '\u201A'], ['-', '\u2010'], [';', '\u037E'], ['A', '\u0391'], ['B', '\u0392'],
