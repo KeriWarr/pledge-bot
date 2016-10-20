@@ -13,8 +13,9 @@ const MESSAGE_REGEX = /^(?:I )?pledge (.+)$/i;
 // The second option is actually a unicode double dash
 const OPTION_REGEX = /^(--|—)/;
 const CENTS_REGEX = /\.0+$/;
-// const TAG_REGEX = /^@[a-zA-Z0-9.-_]{1,21}$/;
+// const TAG_REGEX = /^@([a-zA-Z0-9.-_]{1,21})$/;
 const USER_ID_REGEX = /^<@(U[A-Z0-9]+)>$/;
+const PLEDGE_REGEX = /^(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?#(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?(?: that)? (.+)$/;
 
 const DEFAULT_CURRENCY = 'CAD';
 const CURRENCY_MAP = {
@@ -36,6 +37,7 @@ const ERRORS = {
   missingUserArgument: 'You must specify a @user',
   nonExistentUser: 'That user is not in this team.',
   noResults: kind => `I couldn't find any${kind ? ` ${kind}` : ''} wagers.`,
+  malformedPledge: 'Sorry, I couldn\'t understand that pledge.',
 };
 const MESSAGES = {
   operationSuccess: kind => `You've ${pastTenseify(kind)} the wager!`,
@@ -47,6 +49,9 @@ const getIdFromStr = str => str && ((str.match(ID_REGEX) || [])[0] || null);
 
 const getUserIdFromStr = str =>
   str && ((str.match(USER_ID_REGEX) || [])[1] || null);
+//
+// const getUserNameFromTag = str =>
+//   str && ((str.match(TAG_REGEX) || [])[1] || null);
 
 const italic = str => str && `_${str}_`;
 
@@ -76,6 +81,12 @@ const userIdToName = ({ id, userNameMap }) => {
   const name = (_.find(userNameMap, user => user.id === id) || {}).real_name;
   return name || null;
 };
+
+// const tagToName = ({ tag, userNameMap }) => {
+//   const userName = getUserNameFromTag(tag);
+//   const name = (_.find(userNameMap, user => user.name === userName) || {}).real_name;
+//   return name || null;
+// }
 
 const baseWagerDescription = ({ showStatus = false } = {}, { userNameMap }) =>
 (wager) => {
@@ -149,10 +160,10 @@ const getWagers = ({ filters = [] } = {}) =>
       )
     );
 
-const createOperation = operation =>
+const createOperation = ({ operation, wager }) =>
   fetchWrapper({
     url: `${API_ROOT}${OPERATIONS_PATH}`,
-    data: { operation },
+    data: { operation, wager },
   });
 
 const requiresId = handler => (options) => {
@@ -180,7 +191,7 @@ const requiresUser = handler => (options) => {
 
 const makeOperationHandler = ({ kind }) =>
   requiresId(({ sendReply, id, fullName }) =>
-    createOperation({ kind, wager_id: id, user: fullName })
+    createOperation({ operation: { kind, wager_id: id, user: fullName } })
       .then(() => sendReply(MESSAGES.operationSuccess(kind)))
       .catch(() => sendReply(ERRORS.operationFailure(kind))));
 
@@ -197,7 +208,7 @@ const userInvoledInWager = ({ user }) => wager =>
   wager.maker === user || wager.taker === user || wager.arbiter === user;
 
 const handleAll = ({ sendReply, userNameMap }) =>
-  getWagers()
+  getWagers({ filters: [(wager => wager.status !== 'cancelled')] })
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
         || ERRORS.noResults()
@@ -237,6 +248,29 @@ const handleUser = requiresUser(({ sendReply, usersName, userNameMap }) =>
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
         || ERRORS.noResults('of their')
     )).catch(() => sendReply(ERRORS.serverFailure)));
+
+const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName }) => {
+  const args = argString && argString.split(' ').slice(1).join(' ');
+  const pledgeMatches = args && args.match(PLEDGE_REGEX);
+  if (!pledgeMatches || pledgeMatches.length < 8) {
+    return sendReply(ERRORS.malformedPledge);
+  }
+  return createOperation({
+    operation: { kind: 'propose' },
+    wager: {
+      maker: fullName,
+      taker: usersName,
+      maker_offer_description: pledgeMatches[1],
+      maker_offer_amount: parseFloat(pledgeMatches[2]),
+      maker_offer_currency: pledgeMatches[3] || DEFAULT_CURRENCY,
+      taker_offer_description: pledgeMatches[4],
+      taker_offer_amount: parseFloat(pledgeMatches[5]),
+      taker_offer_currency: pledgeMatches[6] || DEFAULT_CURRENCY,
+      outcome: pledgeMatches[7],
+    },
+  }).then(() => sendReply(MESSAGES.proposeSuccess))
+    .catch(() => sendReply(ERRORS.proposeFailure));
+});
 
 const makeSendReply = response => (reply) => {
   logger.info(`Sending response: ${reply}`);
@@ -334,9 +368,14 @@ export default function pledge(message, users, response) {
     case '-h':
     case 'how':
     case 'help':
-
+      sendReply('Hahaha. did you think I would document this shit?\nAsk me again tomorrow.');
       break;
     default:
-
+      handleDefault({
+        sendReply,
+        fullName,
+        userNameMap,
+        argString: `${command} ${argString}`,
+      });
   }
 }
