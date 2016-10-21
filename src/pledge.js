@@ -1,5 +1,6 @@
-import fetch from 'node-fetch';
+import { camelizeKeys, decamelizeKeys } from 'humps';
 import _ from 'lodash';
+import fetch from 'node-fetch';
 
 import logger from './logger';
 
@@ -16,6 +17,8 @@ const CENTS_REGEX = /\.0{1,2}$/;
 const USER_ID_REGEX = /^<@(U[A-Z0-9]+)>$/;
 const PLEDGE_REGEX = /^(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?#(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?(?: that)? (.+)$/;
 const STATUS_CODE_REGEX = /^\d{3}$/;
+
+const USEFUL_USER_KEYS = ['name', 'real_name', 'id'];
 
 const DEFAULT_CURRENCY = 'CAD';
 const CURRENCY_EMOJI_MAP = {
@@ -177,35 +180,29 @@ const untagWord = ({ word }) => {
 };
 
 const nameToTag = ({ name, userNameMap }) => {
-  const tag = (_.find(userNameMap, user => user.real_name === name) || {}).name;
+  const tag = (_.find(userNameMap, user => user.realName === name) || {}).name;
   // logger.info(tag, untagWord(`@${tag}`));
   return tag ? untagWord({ word: `@${tag}` }) : null;
 };
 
 const userIdToName = ({ id, userNameMap }) => {
-  const name = (_.find(userNameMap, user => user.id === id) || {}).real_name;
+  const name = (_.find(userNameMap, user => user.id === id) || {}).realName;
   return name || null;
 };
-
-// const tagToName = ({ tag, userNameMap }) => {
-//   const userName = getUserNameFromTag(tag);
-//   const name = (_.find(userNameMap, user => user.name === userName) || {}).real_name;
-//   return name || null;
-// }
 
 const baseWagerDescription = ({ showStatus = false } = {}, { userNameMap }) =>
 (wager) => {
   const id = wager.id;
   if (!id) return null;
   const makerOffer = getOfferDescription({
-    description: wager.maker_offer_description,
-    amount: wager.maker_offer_amount,
-    currency: wager.maker_offer_currency,
+    description: wager.makerOfferDescription,
+    amount: wager.makerOfferAmount,
+    currency: wager.makerOfferCurrency,
   });
   const takerOffer = getOfferDescription({
-    description: wager.taker_offer_description,
-    amount: wager.taker_offer_amount,
-    currency: wager.taker_offer_currency,
+    description: wager.takerOfferDescription,
+    amount: wager.takerOfferAmount,
+    currency: wager.takerOfferCurrency,
   });
   const outcome = wager.outcome ? ` ~ ${wager.outcome}` : '';
   const makerName = wager.maker && wager.maker.split(' ')[0];
@@ -227,7 +224,7 @@ const getWagerStatusDescription = baseWagerDescription.bind(null, {
 const getInit = ({ data }) =>
 (data
   ? {
-    body: JSON.stringify(data),
+    body: JSON.stringify(decamelizeKeys(data)),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -250,7 +247,7 @@ const fetchWrapper = ({ url, data }) => {
       logger.warn(logMessage);
       throw new Error(response.status);
     })
-    .then(text => JSON.parse(text))
+    .then(text => camelizeKeys(JSON.parse(text)))
     .catch((error) => {
       if (STATUS_CODE_REGEX.test(error.message)) {
         throw error;
@@ -316,7 +313,7 @@ const requiresUser = handler => (options) => {
 
 const makeOperationHandler = ({ kind }) =>
   requiresId(({ sendReply, id, fullName }) =>
-    createOperation({ operation: { kind, wager_id: id, user: fullName } })
+    createOperation({ operation: { kind, wagerId: id, user: fullName } })
       .then(() => sendReply(MESSAGES.operationSuccess(kind)))
       .catch(handleReqestError({ sendReply, kind })));
 
@@ -399,12 +396,12 @@ const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName 
     wager: {
       maker: fullName,
       taker: usersName,
-      maker_offer_description: pledgeMatches[1],
-      maker_offer_amount: parseFloat(pledgeMatches[2]),
-      maker_offer_currency: pledgeMatches[3] || (parseFloat(pledgeMatches[2]) && DEFAULT_CURRENCY),
-      taker_offer_description: pledgeMatches[4],
-      taker_offer_amount: parseFloat(pledgeMatches[5]),
-      taker_offer_currency: pledgeMatches[6] || (parseFloat(pledgeMatches[5]) && DEFAULT_CURRENCY),
+      makerOfferDescription: pledgeMatches[1],
+      makerOfferAmount: parseFloat(pledgeMatches[2]),
+      makerOfferCurrency: pledgeMatches[3] || (parseFloat(pledgeMatches[2]) && DEFAULT_CURRENCY),
+      takerOfferDescription: pledgeMatches[4],
+      takerOfferAmount: parseFloat(pledgeMatches[5]),
+      takerOfferCurrency: pledgeMatches[6] || (parseFloat(pledgeMatches[5]) && DEFAULT_CURRENCY),
       outcome: pledgeMatches[7],
     },
   }).then(() => sendReply(MESSAGES.proposeSuccess))
@@ -426,11 +423,11 @@ export default function pledge(message, users, response) {
   const command = messageCommandArgs[0].replace(OPTION_REGEX, '');
   const argString = messageCommandArgs.slice(1).join(' ');
   const userId = message.user;
-  const user = users[userId];
-  const fullName = user.real_name;
+  const user = camelizeKeys(_.pick(users[userId], USEFUL_USER_KEYS));
+  const fullName = user.realName;
   // const tag = user.name;
   const userNameMap = _.values(users).map(
-    u => _.pick(u, ['name', 'real_name', 'id'])
+    u => camelizeKeys(_.pick(u, USEFUL_USER_KEYS))
   );
 
   const commandParams = { sendReply, argString, fullName, userNameMap };
