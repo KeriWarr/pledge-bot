@@ -1,3 +1,2 @@
-var initialize = require('./compiled');
-
-initialize.default();
+require('dotenv').config()
+require('./compiled').default();;
