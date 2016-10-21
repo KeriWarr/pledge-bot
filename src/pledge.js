@@ -12,22 +12,54 @@ const ID_REGEX = /^\d+$/;
 const MESSAGE_REGEX = /^(?:I )?(?:@?pledge|<@U1V3QU2BU>) (.+)$/i;
 // The second option is actually a unicode double dash
 const OPTION_REGEX = /^(--|—)/;
-const CENTS_REGEX = /\.0+$/;
-// const TAG_REGEX = /^@([a-zA-Z0-9.-_]{1,21})$/;
+const CENTS_REGEX = /\.0{1,2}$/;
 const USER_ID_REGEX = /^<@(U[A-Z0-9]+)>$/;
 const PLEDGE_REGEX = /^(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?#(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?(?: that)? (.+)$/;
 
 const DEFAULT_CURRENCY = 'CAD';
-const CURRENCY_MAP = {
+const CURRENCY_EMOJI_MAP = {
   CAD: ':flag-ca:',
   USD: ':flag-us:',
+  SZL: ':szl:',
+  BYR: ':beer:',
 };
 
-const pastTenseify = (verb) => {
-  if (verb === 'take') return 'taken';
-  else if (verb === 'cancel') return 'cancelled';
-  return `${verb}ed`;
+const STATUSES = {
+  UNACCEPTED: 'unaccepted',
+  LISTED: 'listed',
+  UNCONFIRMED: 'unconfirmed',
+  ACCEPTED: 'accepted',
+  REJECTED: 'rejected',
+  CANCELLED: 'cancelled',
+  EXPIRED: 'expired',
+  CLOSED: 'closed',
+  COMPLETED: 'completed',
+  APPEALED: 'appealed',
 };
+const OPERATIONS = {
+  TAKE: 'take',
+  ACCEPT: 'accept',
+  REJECT: 'reject',
+  CANCEL: 'cancel',
+  CLOSE: 'close',
+  APPEAL: 'appeal',
+};
+const ERROR_STATUSES = [
+  STATUSES.REJECTED,
+  STATUSES.CANCELLED,
+  STATUSES.EXPIRED,
+  STATUSES.APPEALED,
+];
+const OPERATION_PRESENT_PERFECT_TENSES = {
+  [OPERATIONS.TAKE]: 'taken',
+  [OPERATIONS.CANCELLED]: 'cancelled',
+};
+
+/**
+ * Converts an operation verb into its present perfect tense.
+ */
+const presentPerfectify = operation =>
+  OPERATION_PRESENT_PERFECT_TENSES[operation] || `${operation}ed`;
 
 const ERRORS = {
   operationFailure: kind => `Sorry, you can't ${kind} that wager.`,
@@ -42,31 +74,55 @@ const ERRORS = {
   invalidCommand: 'That is not a valid command.',
 };
 const MESSAGES = {
-  operationSuccess: kind => `You've ${pastTenseify(kind)} the wager!`,
+  operationSuccess: kind => `You've ${presentPerfectify(kind)} the wager!`,
   proposeSuccess: 'You\'ve created a wager!',
 };
 
+/**
+ * Removes a period followed by one or two zeroes from the end of str.
+ */
 const stripZeroCents = str => str && str.replace(CENTS_REGEX, '');
 
+/**
+ * If str is a sequence of digits, return it, otherwise return null.
+ */
 const getIdFromStr = str => str && ((str.match(ID_REGEX) || [])[0] || null);
 
+/**
+ * If str is a user id string from slack, i.e. wrapped in angle brackets,
+ * return the user id inside, else return null.
+ */
 const getUserIdFromStr = str =>
   str && ((str.match(USER_ID_REGEX) || [])[1] || null);
-//
-// const getUserNameFromTag = str =>
-//   str && ((str.match(TAG_REGEX) || [])[1] || null);
 
+/**
+ * Slack italicization markup
+ */
 const italic = str => str && `_${str}_`;
 
+/**
+ * Slack boldicization markup
+ */
 const bold = str => str && `*${str}*`;
 
+/**
+ * Slack codeicization markup
+ */
 const pre = str => str && `\`${str}\``;
 
+/**
+ * Accepts a currency code as per ISO 4217. If it is the default currency,
+ * return the empty string, if it has a corresponding emoji, return the emoji
+ * string, else return the original string.
+ */
 const formatCurrency = ({ currency }) => {
   const defaultedCurrency = currency === DEFAULT_CURRENCY ? '' : currency;
-  return CURRENCY_MAP[defaultedCurrency] || defaultedCurrency;
+  return CURRENCY_EMOJI_MAP[defaultedCurrency] || defaultedCurrency;
 };
 
+/**
+ * Formats data representation of an offer for slack.
+ */
 const getOfferDescription = ({ description, amount, currency }) => {
   const formattedCurrency = formatCurrency({ currency });
   const currencyDisplay = formattedCurrency ? ` ${formattedCurrency}` : '';
@@ -75,9 +131,13 @@ const getOfferDescription = ({ description, amount, currency }) => {
     : `${bold(stripZeroCents(amount))}${currencyDisplay}`;
 };
 
+/**
+ * Converts a string to use equivalet looking unicode characters so that
+ * they dont' behave as tag words on slack.
+ */
 const untagWord = ({ word }) => {
   const homoglyphReplacements = [
-    //mbasically identical replacements
+    // basically identical replacements
     [',', '\u201A'], ['-', '\u2010'], [';', '\u037E'], ['A', '\u0391'], ['B', '\u0392'],
     ['C', '\u0421'], ['D', '\u216E'], ['E', '\u0395'], ['H', '\u0397'], ['I', '\u0399'],
     ['J', '\u0408'], ['K', '\u039A'], ['L', '\u216C'], ['M', '\u039C'], ['N', '\u039D'],
@@ -247,7 +307,7 @@ const userInvoledInWager = ({ user }) => wager =>
   wager.maker === user || wager.taker === user || wager.arbiter === user;
 
 const handleAll = ({ sendReply, userNameMap }) =>
-  getWagers({ filters: [(wager => wager.status !== 'cancelled')] })
+  getWagers({ filters: [(wager => !ERROR_STATUSES.includes(wager.status))] })
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
         || ERRORS.noResults()
