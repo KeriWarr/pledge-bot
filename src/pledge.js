@@ -15,6 +15,7 @@ const OPTION_REGEX = /^(--|—)/;
 const CENTS_REGEX = /\.0{1,2}$/;
 const USER_ID_REGEX = /^<@(U[A-Z0-9]+)>$/;
 const PLEDGE_REGEX = /^(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?#(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?(?: that)? (.+)$/;
+const STATUS_CODE_REGEX = /^\d{3}$/;
 
 const DEFAULT_CURRENCY = 'CAD';
 const CURRENCY_EMOJI_MAP = {
@@ -36,13 +37,14 @@ const STATUSES = {
   COMPLETED: 'completed',
   APPEALED: 'appealed',
 };
-const OPERATIONS = {
+const KINDS = {
   TAKE: 'take',
   ACCEPT: 'accept',
   REJECT: 'reject',
   CANCEL: 'cancel',
   CLOSE: 'close',
   APPEAL: 'appeal',
+  PROPOSE: 'propose',
 };
 const ERROR_STATUSES = [
   STATUSES.REJECTED,
@@ -50,21 +52,25 @@ const ERROR_STATUSES = [
   STATUSES.EXPIRED,
   STATUSES.APPEALED,
 ];
-const OPERATION_PRESENT_PERFECT_TENSES = {
-  [OPERATIONS.TAKE]: 'taken',
-  [OPERATIONS.CANCELLED]: 'cancelled',
+const KIND_PRESENT_PERFECT_TENSES = {
+  [KINDS.TAKE]: 'taken',
+  [KINDS.CANCELLED]: 'cancelled',
+};
+const STATUS_CODE_MESSAGES = {
+  404: () => 'That wager doesn\'t exist.',
+  422: kind => `You can't ${kind} that wager.`,
 };
 
 /**
- * Converts an operation verb into its present perfect tense.
+ * Converts a kind verb into its present perfect tense.
  */
-const presentPerfectify = operation =>
-  OPERATION_PRESENT_PERFECT_TENSES[operation] || `${operation}ed`;
+const presentPerfectify = kind =>
+  KIND_PRESENT_PERFECT_TENSES[kind] || `${kind}ed`;
 
 const ERRORS = {
   operationFailure: kind => `Sorry, you can't ${kind} that wager.`,
   wagerNotFound: 'I couldn\'t find that wager.',
-  serverFailure: 'Sorry, the request failed.',
+  serverFailure: '/shrug Sorry, something went wrong.',
   missingIdArgument: 'You must specify an id.',
   missingUserArgument: 'You must specify a @user',
   nonExistentUser: 'That user is not in this team.',
@@ -133,7 +139,7 @@ const getOfferDescription = ({ description, amount, currency }) => {
 
 /**
  * Converts a string to use equivalet looking unicode characters so that
- * they dont' behave as tag words on slack.
+ * they dont' behave as tag words on slack.q
  */
 const untagWord = ({ word }) => {
   const homoglyphReplacements = [
@@ -232,20 +238,40 @@ const getInit = ({ data }) =>
 
 const fetchWrapper = ({ url, data }) => {
   const init = getInit({ data });
-  logger.info(`${init.method}: ${url}`);
+  logger.info(`Making request: ${init.method} - ${url}`);
   return fetch(url, init)
     .then((response) => {
+      const logMessage =
+        `Server responded with: ${response.status} - ${response.statusText}`;
       if (response.ok) {
+        logger.info(logMessage);
         return response.text();
       }
-      throw new Error(response.statusText);
+      logger.warn(logMessage);
+      throw new Error(response.status);
     })
     .then(text => JSON.parse(text))
     .catch((error) => {
-      logger.error(`Server responded with: ${error.message}`);
-      throw error;
+      if (STATUS_CODE_REGEX.test(error.message)) {
+        throw error;
+      }
+      logger.error(error.toString());
     });
 };
+
+const handleReqestError = ({ kind, sendReply }) => (error) => {
+  if (STATUS_CODE_REGEX.test(error.message)) {
+    if (kind === KINDS.PROPOSE) {
+      sendReply(ERRORS.proposeFailure);
+      return;
+    }
+    const messageFunction = STATUS_CODE_MESSAGES[error.message];
+    sendReply(messageFunction ? messageFunction(kind) : ERRORS.serverFailure);
+    return;
+  }
+  logger.error(error.toString());
+};
+
 
 const getWager = ({ id }) => fetchWrapper({
   url: `${API_ROOT}${WAGERS_PATH}/${id}`,
@@ -292,7 +318,7 @@ const makeOperationHandler = ({ kind }) =>
   requiresId(({ sendReply, id, fullName }) =>
     createOperation({ operation: { kind, wager_id: id, user: fullName } })
       .then(() => sendReply(MESSAGES.operationSuccess(kind)))
-      .catch(() => sendReply(ERRORS.operationFailure(kind))));
+      .catch(handleReqestError({ sendReply, kind })));
 
 const makeShowStatusHandler = ({ status }) => ({ sendReply, userNameMap }) =>
   getWagers({ filters: [(wager => wager.status === status)] })
@@ -301,7 +327,7 @@ const makeShowStatusHandler = ({ status }) => ({ sendReply, userNameMap }) =>
         .map(getWagerDescription({ userNameMap }))
         .join('\n')
         || ERRORS.noResults(status)
-    )).catch(() => sendReply(ERRORS.serverFailure));
+    )).catch(handleReqestError({ sendReply }));
 
 const userInvoledInWager = ({ user }) => wager =>
   wager.maker === user || wager.taker === user || wager.arbiter === user;
@@ -311,12 +337,12 @@ const handleAll = ({ sendReply, userNameMap }) =>
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
         || ERRORS.noResults()
-    )).catch(() => sendReply(ERRORS.serverFailure));
+    )).catch(handleReqestError({ sendReply }));
 
 const handleShow = requiresId(({ sendReply, id }) =>
   getWager({ id })
     .then(wager => sendReply(getWagerDescription(wager)))
-    .catch(() => sendReply(ERRORS.wagerNotFound)));
+    .catch(handleReqestError({ sendReply })));
 
 const handleAccept = makeOperationHandler({ kind: 'accept' });
 const handleReject = makeOperationHandler({ kind: 'reject' });
@@ -339,14 +365,14 @@ const handleMine = ({ sendReply, fullName, userNameMap }) =>
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
         || ERRORS.noResults('of your')
-    )).catch(() => sendReply(ERRORS.serverFailure));
+    )).catch(handleReqestError({ sendReply }));
 
 const handleUser = requiresUser(({ sendReply, usersName, userNameMap }) =>
   getWagers({ filters: [userInvoledInWager({ user: usersName })] })
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
         || ERRORS.noResults('of their')
-    )).catch(() => sendReply(ERRORS.serverFailure)));
+    )).catch(handleReqestError({ sendReply })));
 
 const handleHelp = ({ sendReply }) => sendReply(
 `${pre('all')} - get all wagers
@@ -367,8 +393,9 @@ const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName 
   if (!pledgeMatches || pledgeMatches.length < 8) {
     return sendReply(ERRORS.malformedPledge);
   }
+  const kind = KINDS.PROPOSE;
   return createOperation({
-    operation: { kind: 'propose' },
+    operation: { kind },
     wager: {
       maker: fullName,
       taker: usersName,
@@ -381,11 +408,11 @@ const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName 
       outcome: pledgeMatches[7],
     },
   }).then(() => sendReply(MESSAGES.proposeSuccess))
-    .catch(() => sendReply(ERRORS.proposeFailure));
+    .catch(handleReqestError({ kind, sendReply }));
 });
 
 const makeSendReply = response => (reply) => {
-  logger.info(`Sending response: ${reply}`);
+  logger.info(`Sending message: ${reply.split('\n')[0]} ...`);
   response.end(reply);
 };
 
@@ -487,7 +514,7 @@ export default function pledge(message, users, response) {
         sendReply(ERRORS.nonExistentUser);
         return;
       }
-      if (!command.match(USER_ID_REGEX)) {
+      if (!USER_ID_REGEX.test(command)) {
         sendReply(ERRORS.invalidCommand);
         return;
       }
