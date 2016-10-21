@@ -43,6 +43,7 @@ const STATUSES = {
   COMPLETED: 'completed',
   APPEALED: 'appealed',
 };
+const STATUSES_ARRAY = _.values(STATUSES);
 const KINDS = {
   TAKE: 'take',
   ACCEPT: 'accept',
@@ -121,6 +122,22 @@ const COMMAND_DETAILS = {
     flag: 'p',
   },
 };
+
+const FILTER_DETAILS = Object.assign({
+  MINE: {
+    name: 'mine',
+    aliases: ['me', 'my'],
+    flag: 'm',
+  },
+  USER: {
+    name: 'user',
+    aliases: [],
+    flag: 'u',
+  },
+}, _.zipObject(STATUSES_ARRAY, STATUSES_ARRAY.map(status => ({
+  name: status,
+  aliases: [],
+}))));
 
 /**
  * Converts a kind verb into its present perfect tense.
@@ -375,15 +392,6 @@ const makeOperationHandler = ({ kind }) =>
       .then(() => sendReply(MESSAGE_FUNCTIONS.operationSuccess(kind)))
       .catch(handleReqestError({ sendReply, kind })));
 
-const makeShowStatusHandler = ({ status }) => ({ sendReply, userNameMap }) =>
-  getWagers({ filters: [(wager => wager.status === status)] })
-    .then(wagers => sendReply(
-      wagers
-        .map(getWagerDescription({ userNameMap }))
-        .join('\n')
-        || MESSAGE_FUNCTIONS.noResults(status)
-    )).catch(handleReqestError({ sendReply }));
-
 const userInvoledInWager = ({ user }) => wager =>
   wager.maker === user || wager.taker === user || wager.arbiter === user;
 
@@ -398,29 +406,6 @@ const handleShow = requiresId(({ sendReply, userNameMap, id }) =>
   getWager({ id })
     .then(wager => sendReply(getWagerDescription({ userNameMap })(wager)))
     .catch(handleReqestError({ sendReply })));
-
-const handleListed = makeShowStatusHandler({ status: 'listed' });
-const handleUnaccepted = makeShowStatusHandler({ status: 'unaccepted' });
-const handleRejected = makeShowStatusHandler({ status: 'rejected' });
-const handleAccepted = makeShowStatusHandler({ status: 'accepted' });
-const handleClosed = makeShowStatusHandler({ status: 'closed' });
-const handleCompleted = makeShowStatusHandler({ status: 'completed' });
-const handleAppealed = makeShowStatusHandler({ status: 'appealed' });
-const handleCancelled = makeShowStatusHandler({ status: 'cancelled' });
-
-const handleMine = ({ sendReply, fullName, userNameMap }) =>
-  getWagers({ filters: [userInvoledInWager({ user: fullName })] })
-    .then(wagers => sendReply(
-      wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
-        || MESSAGE_FUNCTIONS.noResults('of your')
-    )).catch(handleReqestError({ sendReply }));
-
-const handleUser = requiresUser(({ sendReply, usersName, userNameMap }) =>
-  getWagers({ filters: [userInvoledInWager({ user: usersName })] })
-    .then(wagers => sendReply(
-      wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
-        || MESSAGE_FUNCTIONS.noResults('of their')
-    )).catch(handleReqestError({ sendReply })));
 
 const handleHelp = ({ sendReply }) => sendReply(
 `${pre('all')} - get all wagers
@@ -481,6 +466,45 @@ const handleCommand = (command) => {
   }
 };
 
+// TODO: move this into constants
+const getErrorQualifierText = (filters) => {
+  if (filters.length > 1) return 'such';
+  else if (filters[0] === FILTER_DETAILS.MINE.name) return 'of your';
+  else if (filters[0] === FILTER_DETAILS.USER.name) return 'of their';
+  return filters[0];
+};
+
+// assume filetrs.length >= 1
+const handleFilter = (filters) => {
+  let showStatus = true;
+  const filterMakers = filters.map((name) => {
+    switch (name) {
+      case FILTER_DETAILS.MINE.name:
+        return ({ fullName }) => userInvoledInWager({ user: fullName });
+      case FILTER_DETAILS.USER.name:
+        return ({ usersName }) => userInvoledInWager({ user: usersName });
+      default:
+        showStatus = false;
+        return () => wager => wager.status === name;
+    }
+  });
+  const errorQualifierText = getErrorQualifierText(filters);
+  const descriptionFunction = showStatus
+    ? getWagerStatusDescription
+    : getWagerDescription;
+  const filterHandler = ({ sendReply, userNameMap, fullName, usersName }) =>
+    getWagers({ filters:
+      filterMakers.map(filterMaker => filterMaker({ fullName, usersName })),
+    }).then(wagers => sendReply(
+        wagers.map(descriptionFunction({ userNameMap })).join('\n')
+          || MESSAGE_FUNCTIONS.noResults(errorQualifierText)
+      )).catch(handleReqestError({ sendReply }));
+  if (filters.includes(FILTER_DETAILS.USER.name)) {
+    return requiresUser(filterHandler);
+  }
+  return filterHandler;
+};
+
 const makeSendReply = response => (reply) => {
   logger.info(`Sending message: ${reply.split('\n')[0]} ...`);
   response.end(reply);
@@ -495,84 +519,74 @@ export default function pledge(message, users, response) {
   const argString = messageMatches[1];
   const args = argString.split(' ');
   const firstArg = args[0];
-  const remainingArgs = args.slice(1).join(' ');
 
   const userId = message.user;
   const user = camelizeKeys(_.pick(users[userId], USEFUL_USER_KEYS));
-  const fullName = user.real_name;
+  const fullName = user.realName;
   // const tag = user.name;
   const userNameMap = _.values(users).map(
     u => camelizeKeys(_.pick(u, USEFUL_USER_KEYS))
   );
 
-  const commandParams = {
-    sendReply, argString: remainingArgs, fullName, userNameMap,
-  };
-
   const commandNames = _.keys(COMMAND_DETAILS);
   for (let i = 0; i < commandNames.length; i += 1) {
     const command = COMMAND_DETAILS[commandNames[i]];
     const names = command.aliases.concat(command.name);
-    const argIsCommand = names.includes(firstArg);
-    const argIsOption = names.includes(firstArg.replace(OPTION_REGEX, ''));
+    const argIsCommand = names.includes(firstArg.replace(OPTION_REGEX, ''));
     const argIsFlag = command.flag && firstArg === `-${command.flag}`;
-    if (argIsCommand || argIsOption || argIsFlag) {
-      handleCommand(command.name)(commandParams);
+    if (argIsCommand || argIsFlag) {
+      handleCommand(command.name)({
+        sendReply,
+        fullName,
+        userNameMap,
+        argString: args.slice(1).join(' '),
+      });
       return;
     }
   }
 
-  switch (firstArg) {
-    case '-l':
-    case 'available':
-    case 'listed':
-      handleListed(commandParams);
-      break;
-    case 'unaccepted':
-      handleUnaccepted(commandParams);
-      break;
-    case 'rejected':
-      handleRejected(commandParams);
-      break;
-    case 'accepted':
-    case 'open':
-      handleAccepted(commandParams);
-      break;
-    case 'closed':
-      handleClosed(commandParams);
-      break;
-    case 'completed':
-      handleCompleted(commandParams);
-      break;
-    case 'appealed':
-      handleAppealed(commandParams);
-      break;
-    case 'cancelled':
-      handleCancelled(commandParams);
-      break;
-    case '-m':
-    case 'mine':
-    case 'me':
-      handleMine(commandParams);
-      break;
-    case '-u':
-    case 'user':
-      handleUser(commandParams);
-      break;
-    default:
-      if (firstArg[0] === '@') {
-        sendReply(MESSAGES.NON_EXISTENT_USER);
-        return;
+  const filters = [];
+
+  const filterNames = _.keys(FILTER_DETAILS);
+  args.some((arg) => {
+    for (let i = 0; i < filterNames.length; i += 1) {
+      const filter = FILTER_DETAILS[filterNames[i]];
+      const names = filter.aliases.concat(filter.name);
+      const argIsFilter = names.includes(arg.replace(OPTION_REGEX, ''));
+      const argIsFlag = filter.flag && arg === `-${filter.flag}`;
+      if (argIsFilter || argIsFlag) {
+        filters.push(filter.name);
+        break;
       }
-      if (!USER_ID_REGEX.test(firstArg)) {
-        sendReply(MESSAGES.INVALID_COMMAND);
-        return;
+      if (i === filterNames.length - 1) {
+        return true;
       }
-      handleDefault({
-        sendReply,
-        fullName,
-        userNameMap,
-        argString,
-      });
+    }
+    return false;
+  });
+
+  if (filters.length) {
+    handleFilter(filters)({
+      sendReply,
+      fullName,
+      userNameMap,
+      argString: args.slice(filters.length).join(' '),
+    });
+    return;
   }
+
+  if (firstArg[0] === '@') {
+    sendReply(MESSAGES.NON_EXISTENT_USER);
+    return;
+  }
+  if (!USER_ID_REGEX.test(firstArg)) {
+    sendReply(MESSAGES.INVALID_COMMAND);
+    return;
+  }
+  handleDefault({
+    sendReply,
+    fullName,
+    userNameMap,
+    argString,
+  });
 }
