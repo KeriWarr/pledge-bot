@@ -74,6 +74,54 @@ const MESSAGES = {
   INVALID_COMMAND: 'That is not a valid command.',
 };
 
+const COMMAND_DETAILS = {
+  ALL: {
+    name: 'all',
+    aliases: ['wagers'],
+    flag: 'w',
+  },
+  SHOW: {
+    name: 'show',
+    aliases: ['get', 'wager'],
+    flag: 's',
+  },
+  HELP: {
+    name: 'help',
+    aliases: ['how', 'why', 'what'],
+    flag: 'h',
+  },
+  [KINDS.TAKE]: {
+    name: KINDS.TAKE,
+    aliases: [],
+    flag: 't',
+  },
+  [KINDS.ACCEPT]: {
+    name: KINDS.ACCEPT,
+    aliases: ['affirm'],
+    flag: 'a',
+  },
+  [KINDS.REJECT]: {
+    name: KINDS.REJECT,
+    aliases: ['remove'],
+    flag: 'r',
+  },
+  [KINDS.CANCEL]: {
+    name: KINDS.CANCEL,
+    aliases: ['remove', 'destroy', 'delete'],
+    flag: 'c',
+  },
+  [KINDS.CLOSE]: {
+    name: KINDS.CLOSE,
+    aliases: ['complete', 'finish'],
+    flag: 'l',
+  },
+  [KINDS.APPEAL]: {
+    name: KINDS.APPEAL,
+    aliases: [],
+    flag: 'p',
+  },
+};
+
 /**
  * Converts a kind verb into its present perfect tense.
  */
@@ -346,17 +394,10 @@ const handleAll = ({ sendReply, userNameMap }) =>
         || MESSAGE_FUNCTIONS.noResults()
     )).catch(handleReqestError({ sendReply }));
 
-const handleShow = requiresId(({ sendReply, id }) =>
+const handleShow = requiresId(({ sendReply, userNameMap, id }) =>
   getWager({ id })
-    .then(wager => sendReply(getWagerDescription(wager)))
+    .then(wager => sendReply(getWagerDescription({ userNameMap })(wager)))
     .catch(handleReqestError({ sendReply })));
-
-const handleAccept = makeOperationHandler({ kind: 'accept' });
-const handleReject = makeOperationHandler({ kind: 'reject' });
-const handleTake = makeOperationHandler({ kind: 'take' });
-const handleCancel = makeOperationHandler({ kind: 'cancel' });
-const handleClose = makeOperationHandler({ kind: 'close' });
-const handleAppeal = makeOperationHandler({ kind: 'appeal' });
 
 const handleListed = makeShowStatusHandler({ status: 'listed' });
 const handleUnaccepted = makeShowStatusHandler({ status: 'unaccepted' });
@@ -427,6 +468,19 @@ const handleDefault = requiresUser((
     .catch(handleReqestError({ kind, sendReply }));
 });
 
+const handleCommand = (command) => {
+  switch (command) {
+    case COMMAND_DETAILS.ALL.name:
+      return handleAll;
+    case COMMAND_DETAILS.SHOW.name:
+      return handleShow;
+    case COMMAND_DETAILS.HELP.name:
+      return handleHelp;
+    default:
+      return makeOperationHandler({ kind: command });
+  }
+};
+
 const makeSendReply = response => (reply) => {
   logger.info(`Sending message: ${reply.split('\n')[0]} ...`);
   response.end(reply);
@@ -438,52 +492,37 @@ export default function pledge(message, users, response) {
   logger.info(`Received message: ${message.text}`);
 
   const sendReply = makeSendReply(response);
-  const messageCommandArgs = messageMatches[1].split(' ');
-  const command = messageCommandArgs[0].replace(OPTION_REGEX, '');
-  const argString = messageCommandArgs.slice(1).join(' ');
+  const argString = messageMatches[1];
+  const args = argString.split(' ');
+  const firstArg = args[0];
+  const remainingArgs = args.slice(1).join(' ');
+
   const userId = message.user;
   const user = camelizeKeys(_.pick(users[userId], USEFUL_USER_KEYS));
-  const fullName = user.realName;
+  const fullName = user.real_name;
   // const tag = user.name;
   const userNameMap = _.values(users).map(
     u => camelizeKeys(_.pick(u, USEFUL_USER_KEYS))
   );
 
-  const commandParams = { sendReply, argString, fullName, userNameMap };
+  const commandParams = {
+    sendReply, argString: remainingArgs, fullName, userNameMap,
+  };
 
-  switch (command) {
-    case '-w':
-    case 'wagers':
-    case 'all':
-      handleAll(commandParams);
-      break;
-    case '-s':
-    case 'get':
-    case 'show':
-      handleShow(commandParams);
-      break;
-    case '-a':
-    case 'accept':
-      handleAccept(commandParams);
-      break;
-    case '-r':
-    case 'reject':
-      handleReject(commandParams);
-      break;
-    case '-t':
-    case 'take':
-      handleTake(commandParams);
-      break;
-    case 'cancel':
-      handleCancel(commandParams);
-      break;
-    case '-c':
-    case 'close':
-      handleClose(commandParams);
-      break;
-    case 'appeal':
-      handleAppeal(commandParams);
-      break;
+  const commandNames = _.keys(COMMAND_DETAILS);
+  for (let i = 0; i < commandNames.length; i += 1) {
+    const command = COMMAND_DETAILS[commandNames[i]];
+    const names = command.aliases.concat(command.name);
+    const argIsCommand = names.includes(firstArg);
+    const argIsOption = names.includes(firstArg.replace(OPTION_REGEX, ''));
+    const argIsFlag = command.flag && firstArg === `-${command.flag}`;
+    if (argIsCommand || argIsOption || argIsFlag) {
+      handleCommand(command.name)(commandParams);
+      return;
+    }
+  }
+
+  switch (firstArg) {
     case '-l':
     case 'available':
     case 'listed':
@@ -520,17 +559,12 @@ export default function pledge(message, users, response) {
     case 'user':
       handleUser(commandParams);
       break;
-    case '-h':
-    case 'how':
-    case 'help':
-      handleHelp(commandParams);
-      break;
     default:
-      if (command[0] === '@') {
+      if (firstArg[0] === '@') {
         sendReply(MESSAGES.NON_EXISTENT_USER);
         return;
       }
-      if (!USER_ID_REGEX.test(command)) {
+      if (!USER_ID_REGEX.test(firstArg)) {
         sendReply(MESSAGES.INVALID_COMMAND);
         return;
       }
@@ -538,7 +572,7 @@ export default function pledge(message, users, response) {
         sendReply,
         fullName,
         userNameMap,
-        argString: `${command} ${argString}`,
+        argString,
       });
   }
 }
