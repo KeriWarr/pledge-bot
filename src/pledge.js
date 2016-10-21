@@ -11,11 +11,14 @@ const WAGERS_PATH = '/wagers';
 
 const ID_REGEX = /^\d+$/;
 const MESSAGE_REGEX = /^(?:I )?(?:@?pledge|<@U1V3QU2BU>) (.+)$/i;
-// The second option is actually a unicode double dash
+// The second option is a unicode double dash
 const OPTION_REGEX = /^(--|—)/;
-const CENTS_REGEX = /\.0{1,2}$/;
+const ZERO_CENTS_REGEX = /\.0{1,2}$/;
 const USER_ID_REGEX = /^<@(U[A-Z0-9]+)>$/;
-const PLEDGE_REGEX = /^(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?#(?:"([\w ]+)"|(\d+(?:\.\d{2})?))([A-Z]{3})?(?: that)? (.+)$/;
+const OFFER_REGEX_STRING = '(?:"([\\w ]+)"|(\\d+(?:\\.\\d{2})?))([A-Z]{3})?';
+const PLEDGE_REGEX = new RegExp(
+  `^${OFFER_REGEX_STRING}#${OFFER_REGEX_STRING}(?: that)? (.+)$`, 'i'
+);
 const STATUS_CODE_REGEX = /^\d{3}$/;
 
 const USEFUL_USER_KEYS = ['name', 'real_name', 'id'];
@@ -59,9 +62,16 @@ const KIND_PRESENT_PERFECT_TENSES = {
   [KINDS.TAKE]: 'taken',
   [KINDS.CANCELLED]: 'cancelled',
 };
-const STATUS_CODE_MESSAGES = {
-  404: () => 'That wager doesn\'t exist.',
-  422: kind => `You can't ${kind} that wager.`,
+
+const MESSAGES = {
+  PROPOSE_SUCCESS: 'You\'ve created a wager!',
+  SERVER_FAILURE: '/shrug Sorry, something went wrong.',
+  MISSING_ID_ARGUMENT: 'You must specify an id.',
+  MISSING_USER_ARGUMENT: 'You must specify a @user',
+  NON_EXISTENT_USER: 'That user is not in this team.',
+  MALFORMED_PLEDGE: 'Sorry, I couldn\'t understand that pledge.',
+  PROPOSE_FAILURE: 'Sorry, the backend didn\'t like that wager',
+  INVALID_COMMAND: 'That is not a valid command.',
 };
 
 /**
@@ -70,27 +80,20 @@ const STATUS_CODE_MESSAGES = {
 const presentPerfectify = kind =>
   KIND_PRESENT_PERFECT_TENSES[kind] || `${kind}ed`;
 
-const ERRORS = {
-  operationFailure: kind => `Sorry, you can't ${kind} that wager.`,
-  wagerNotFound: 'I couldn\'t find that wager.',
-  serverFailure: '/shrug Sorry, something went wrong.',
-  missingIdArgument: 'You must specify an id.',
-  missingUserArgument: 'You must specify a @user',
-  nonExistentUser: 'That user is not in this team.',
-  noResults: kind => `I couldn't find any${kind ? ` ${kind}` : ''} wagers.`,
-  malformedPledge: 'Sorry, I couldn\'t understand that pledge.',
-  proposeFailure: 'Sorry, the backend didn\'t like that wager',
-  invalidCommand: 'That is not a valid command.',
-};
-const MESSAGES = {
+const MESSAGE_FUNCTIONS = {
   operationSuccess: kind => `You've ${presentPerfectify(kind)} the wager!`,
-  proposeSuccess: 'You\'ve created a wager!',
+  noResults: kind => `I couldn't find any${kind ? ` ${kind}` : ''} wagers.`,
+};
+
+const STATUS_CODE_MESSAGE_FUNCTIONS = {
+  404: () => 'That wager doesn\'t exist.',
+  422: kind => `You can't ${kind} that wager.`,
 };
 
 /**
  * Removes a period followed by one or two zeroes from the end of str.
  */
-const stripZeroCents = str => str && str.replace(CENTS_REGEX, '');
+const stripZeroCents = str => str && str.replace(ZERO_CENTS_REGEX, '');
 
 /**
  * If str is a sequence of digits, return it, otherwise return null.
@@ -142,35 +145,40 @@ const getOfferDescription = ({ description, amount, currency }) => {
 
 /**
  * Converts a string to use equivalet looking unicode characters so that
- * they dont' behave as tag words on slack.q
+ * they dont' behave as tag words on slack.
  */
 const untagWord = ({ word }) => {
   const homoglyphReplacements = [
     // basically identical replacements
-    [',', '\u201A'], ['-', '\u2010'], [';', '\u037E'], ['A', '\u0391'], ['B', '\u0392'],
-    ['C', '\u0421'], ['D', '\u216E'], ['E', '\u0395'], ['H', '\u0397'], ['I', '\u0399'],
-    ['J', '\u0408'], ['K', '\u039A'], ['L', '\u216C'], ['M', '\u039C'], ['N', '\u039D'],
-    ['O', '\u039F'], ['P', '\u03A1'], ['S', '\u0405'], ['T', '\u03A4'], ['V', '\u2164'],
-    ['X', '\u03A7'], ['Y', '\u03A5'], ['Z', '\u0396'], ['a', '\u0430'], ['c', '\u03F2'],
-    ['d', '\u217E'], ['e', '\u0435'], ['i', '\u0456'], ['j', '\u0458'], ['l', '\u217C'],
-    ['m', '\u217F'], ['o', '\u03BF'], ['p', '\u0440'], ['s', '\u0455'], ['v', '\u03BD'],
-    ['x', '\u0445'], ['y', '\u0443'], ['\u00DF', '\u03B2'], ['\u00E4', '\u04D3'],
-    ['\u00F6', '\u04E7'], ['@', '\uFF20'], ['0', '\uFF10'], ['1', '\uFF11'],
-    // similar replacements
+    [',', '\u201A'], ['-', '\u2010'], [';', '\u037E'], ['A', '\u0391'],
+    ['B', '\u0392'], ['C', '\u0421'], ['D', '\u216E'], ['E', '\u0395'],
+    ['H', '\u0397'], ['I', '\u0399'], ['J', '\u0408'], ['K', '\u039A'],
+    ['L', '\u216C'], ['M', '\u039C'], ['N', '\u039D'], ['O', '\u039F'],
+    ['P', '\u03A1'], ['S', '\u0405'], ['T', '\u03A4'], ['V', '\u2164'],
+    ['X', '\u03A7'], ['Y', '\u03A5'], ['Z', '\u0396'], ['a', '\u0430'],
+    ['c', '\u03F2'], ['d', '\u217E'], ['e', '\u0435'], ['i', '\u0456'],
+    ['j', '\u0458'], ['l', '\u217C'], ['m', '\u217F'], ['o', '\u03BF'],
+    ['p', '\u0440'], ['s', '\u0455'], ['v', '\u03BD'], ['x', '\u0445'],
+    ['y', '\u0443'], ['\u00DF', '\u03B2'], ['\u00E4', '\u04D3'],
+    ['\u00F6', '\u04E7'], ['@', '\uFF20'], ['0', '\uFF10'],
+    // // similar replacements
     // ['/', '\u2044'], ['F', '\u03DC'], ['G', '\u050C'], ['\u00C4', '\u04D2'],
     // ['\u00D6', '\u04E6'],
     // // fixed width replacements
-    // ['*', '\uFF0A'], ['!', '\uFF01'], ['"', '\uFF02'], ['#', '\uFF03'], ['$', '\uFF04'],
-    // ['%', '\uFF05'], ['&', '\uFF06'], ['\'', '\uFF07'], ['(', '\uFF08'], [')', '\uFF09'],
-    // ['+', '\uFF0B'], ['.', '\uFF0E'], ['0', '\uFF10'], ['1', '\uFF11'], ['2', '\uFF12'],
-    // ['3', '\uFF13'], ['4', '\uFF14'], ['5', '\uFF15'], ['6', '\uFF16'], ['7', '\uFF17'],
-    // ['8', '\uFF18'], ['9', '\uFF19'], [':', '\uFF1A'], ['<', '\uFF1C'], ['=', '\uFF1D'],
-    // ['>', '\uFF1E'], ['?', '\uFF1F'],  ['Q', '\uFF31'], ['R', '\uFF32'],
-    // ['U', '\uFF35'], ['W', '\uFF37'], ['[', '\uFF3B'], ['\\', '\uFF3C'], [']', '\uFF3D'],
-    // ['^', '\uFF3E'], ['_', '\uFF3F'], ['`', '\uFF40'], ['b', '\uFF42'], ['f', '\uFF46'],
-    // ['g', '\uFF47'], ['h', '\uFF48'], ['k', '\uFF4B'], ['n', '\uFF4E'], ['q', '\uFF51'],
-    // ['r', '\uFF52'], ['t', '\uFF54'], ['u', '\uFF55'], ['w', '\uFF57'], ['z', '\uFF5A'],
-    // ['{', '\uFF5B'], ['|', '\uFF5C'], ['}', '\uFF5D'], ['~', '\uFF5E'],
+    // ['*', '\uFF0A'], ['!', '\uFF01'], ['"', '\uFF02'], ['#', '\uFF03'],
+    // ['$', '\uFF04'], ['%', '\uFF05'], ['&', '\uFF06'], ['\'', '\uFF07'],
+    // ['(', '\uFF08'], [')', '\uFF09'], ['+', '\uFF0B'], ['.', '\uFF0E'],
+    // ['0', '\uFF10'], ['1', '\uFF11'], ['2', '\uFF12'], ['3', '\uFF13'],
+    // ['4', '\uFF14'], ['5', '\uFF15'], ['6', '\uFF16'], ['7', '\uFF17'],
+    // ['8', '\uFF18'], ['9', '\uFF19'], [':', '\uFF1A'], ['<', '\uFF1C'],
+    // ['=', '\uFF1D'], ['>', '\uFF1E'], ['?', '\uFF1F'],  ['Q', '\uFF31'],
+    // ['R', '\uFF32'], ['U', '\uFF35'], ['W', '\uFF37'], ['[', '\uFF3B'],
+    // ['\\', '\uFF3C'], [']', '\uFF3D'], ['^', '\uFF3E'], ['_', '\uFF3F'],
+    // ['`', '\uFF40'], ['b', '\uFF42'], ['f', '\uFF46'], ['g', '\uFF47'],
+    // ['h', '\uFF48'], ['k', '\uFF4B'], ['n', '\uFF4E'], ['q', '\uFF51'],
+    // ['r', '\uFF52'], ['t', '\uFF54'], ['u', '\uFF55'], ['w', '\uFF57'],
+    // ['z', '\uFF5A'], ['{', '\uFF5B'], ['|', '\uFF5C'], ['}', '\uFF5D'],
+    // ['~', '\uFF5E'],
   ];
   let newWord = word;
   homoglyphReplacements.forEach((replacement) => {
@@ -259,11 +267,13 @@ const fetchWrapper = ({ url, data }) => {
 const handleReqestError = ({ kind, sendReply }) => (error) => {
   if (STATUS_CODE_REGEX.test(error.message)) {
     if (kind === KINDS.PROPOSE) {
-      sendReply(ERRORS.proposeFailure);
+      sendReply(MESSAGES.PROPOSE_FAILURE);
       return;
     }
-    const messageFunction = STATUS_CODE_MESSAGES[error.message];
-    sendReply(messageFunction ? messageFunction(kind) : ERRORS.serverFailure);
+    const messageFunction = STATUS_CODE_MESSAGE_FUNCTIONS[error.message];
+    sendReply(
+      messageFunction ? messageFunction(kind) : MESSAGES.SERVER_FAILURE
+    );
     return;
   }
   logger.error(error.toString());
@@ -291,30 +301,30 @@ const createOperation = ({ operation, wager }) =>
 const requiresId = handler => (options) => {
   const args = options.argString && options.argString.split(' ');
   if (!args || args.length === 0 || !args[0]) {
-    return options.sendReply(ERRORS.missingIdArgument);
+    return options.sendReply(MESSAGES.MISSING_ID_ARGUMENT);
   }
   const id = getIdFromStr(args[0]);
-  if (!id) return options.sendReply(ERRORS.missingIdArgument);
+  if (!id) return options.sendReply(MESSAGES.MISSING_ID_ARGUMENT);
   return handler({ id, ...options });
 };
 
 const requiresUser = handler => (options) => {
   const args = options.argString && options.argString.split(' ');
   if (!args || args.length === 0 || !args[0]) {
-    return options.sendReply(ERRORS.missingUserArgument);
+    return options.sendReply(MESSAGES.MISSING_USER_ARGUMENT);
   }
   const usersName = userIdToName({
     id: getUserIdFromStr(args[0]),
     userNameMap: options.userNameMap,
   });
-  if (!usersName) return options.sendReply(ERRORS.nonExistentUser);
+  if (!usersName) return options.sendReply(MESSAGES.NON_EXISTENT_USER);
   return handler({ usersName, ...options });
 };
 
 const makeOperationHandler = ({ kind }) =>
   requiresId(({ sendReply, id, fullName }) =>
     createOperation({ operation: { kind, wagerId: id, user: fullName } })
-      .then(() => sendReply(MESSAGES.operationSuccess(kind)))
+      .then(() => sendReply(MESSAGE_FUNCTIONS.operationSuccess(kind)))
       .catch(handleReqestError({ sendReply, kind })));
 
 const makeShowStatusHandler = ({ status }) => ({ sendReply, userNameMap }) =>
@@ -323,7 +333,7 @@ const makeShowStatusHandler = ({ status }) => ({ sendReply, userNameMap }) =>
       wagers
         .map(getWagerDescription({ userNameMap }))
         .join('\n')
-        || ERRORS.noResults(status)
+        || MESSAGE_FUNCTIONS.noResults(status)
     )).catch(handleReqestError({ sendReply }));
 
 const userInvoledInWager = ({ user }) => wager =>
@@ -333,7 +343,7 @@ const handleAll = ({ sendReply, userNameMap }) =>
   getWagers({ filters: [(wager => !ERROR_STATUSES.includes(wager.status))] })
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
-        || ERRORS.noResults()
+        || MESSAGE_FUNCTIONS.noResults()
     )).catch(handleReqestError({ sendReply }));
 
 const handleShow = requiresId(({ sendReply, id }) =>
@@ -361,14 +371,14 @@ const handleMine = ({ sendReply, fullName, userNameMap }) =>
   getWagers({ filters: [userInvoledInWager({ user: fullName })] })
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
-        || ERRORS.noResults('of your')
+        || MESSAGE_FUNCTIONS.noResults('of your')
     )).catch(handleReqestError({ sendReply }));
 
 const handleUser = requiresUser(({ sendReply, usersName, userNameMap }) =>
   getWagers({ filters: [userInvoledInWager({ user: usersName })] })
     .then(wagers => sendReply(
       wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
-        || ERRORS.noResults('of their')
+        || MESSAGE_FUNCTIONS.noResults('of their')
     )).catch(handleReqestError({ sendReply })));
 
 const handleHelp = ({ sendReply }) => sendReply(
@@ -376,19 +386,26 @@ const handleHelp = ({ sendReply }) => sendReply(
 ${pre('show <id>')} - get one wager
 ${pre('me')} - get your wagers
 ${pre('user <tag>')} - get their wagers
-${pre('accept/reject/cancel/close/appeal <id>')} - advance the state of the wager
-${pre('listed/accepted/closed/completed/unaccepted/rejected/appealed/cancelled')} - get wagers by status
+${pre('accept/reject/cancel/close/appeal <id>')} - advance the state of the \
+wager
+${pre(`listed/accepted/closed/completed/unaccepted/rejected/appealed/\
+cancelled${''}`)} - get wagers by status
 ${pre('<tag> <offer>#<offer> <outcome>')} - make a wager
-An offer consists of a dollar value, and an optional currency, or a double-quote delimited description.
-Note that your full name on slack must match your name on Splitwise in order for the Splitwise integration to work.
-There are a bunch more features such as expiration and maturation dates that I've implemented only on the backend so far - coming soon.`
+An offer consists of a dollar value, and an optional currency, or a \
+double-quote delimited description.
+Note that your full name on slack must match your name on Splitwise in order \
+for the Splitwise integration to work.
+There are a bunch more features such as expiration and maturation dates that \
+I've implemented only on the backend so far - coming soon.`
 );
 
-const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName }) => {
+const handleDefault = requiresUser((
+  { sendReply, fullName, argString, usersName }
+) => {
   const args = argString && argString.split(' ').slice(1).join(' ');
   const pledgeMatches = args && args.match(PLEDGE_REGEX);
   if (!pledgeMatches || pledgeMatches.length < 8) {
-    return sendReply(ERRORS.malformedPledge);
+    return sendReply(MESSAGES.MALFORMED_PLEDGE);
   }
   const kind = KINDS.PROPOSE;
   return createOperation({
@@ -398,13 +415,15 @@ const handleDefault = requiresUser(({ sendReply, fullName, argString, usersName 
       taker: usersName,
       makerOfferDescription: pledgeMatches[1],
       makerOfferAmount: parseFloat(pledgeMatches[2]),
-      makerOfferCurrency: pledgeMatches[3] || (parseFloat(pledgeMatches[2]) && DEFAULT_CURRENCY),
+      makerOfferCurrency: pledgeMatches[3]
+        || (parseFloat(pledgeMatches[2]) && DEFAULT_CURRENCY),
       takerOfferDescription: pledgeMatches[4],
       takerOfferAmount: parseFloat(pledgeMatches[5]),
-      takerOfferCurrency: pledgeMatches[6] || (parseFloat(pledgeMatches[5]) && DEFAULT_CURRENCY),
+      takerOfferCurrency: pledgeMatches[6]
+        || (parseFloat(pledgeMatches[5]) && DEFAULT_CURRENCY),
       outcome: pledgeMatches[7],
     },
-  }).then(() => sendReply(MESSAGES.proposeSuccess))
+  }).then(() => sendReply(MESSAGES.PROPOSE_SUCCESS))
     .catch(handleReqestError({ kind, sendReply }));
 });
 
@@ -508,11 +527,11 @@ export default function pledge(message, users, response) {
       break;
     default:
       if (command[0] === '@') {
-        sendReply(ERRORS.nonExistentUser);
+        sendReply(MESSAGES.NON_EXISTENT_USER);
         return;
       }
       if (!USER_ID_REGEX.test(command)) {
-        sendReply(ERRORS.invalidCommand);
+        sendReply(MESSAGES.INVALID_COMMAND);
         return;
       }
       handleDefault({
