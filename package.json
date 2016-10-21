@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "babel src -w -d compiled & nodemon -w compiled index.js",
-    "build": "babel src --out-dir compiled",
+    "build": "babel src -d compiled",
     "run": "node index.js",
     "start": "npm run build; npm run run",
     "lint": "eslint . --ext .js --ext .jsx || true",
@@ -29,8 +29,8 @@
   "homepage": "https://github.com/KeriWarr/pledge-bot#readme",
   "dependencies": {
     "babel-cli": "^6.16.0",
-    "babel-preset-es2015": "^6.16.0",
-    "babel-preset-stage-2": "^6.17.0",
+    "babel-plugin-transform-object-rest-spread": "^6.16.0",
+    "babel-preset-env": "0.0.6",
     "botstrap": "^0.15.4",
     "dotenv": "^2.0.0",
     "humps": "^2.0.0",
