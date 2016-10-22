@@ -29,6 +29,7 @@
   "homepage": "https://github.com/KeriWarr/pledge-bot#readme",
   "dependencies": {
     "babel-cli": "^6.16.0",
+    "babel-plugin-transform-class-properties": "^6.16.0",
     "babel-plugin-transform-object-rest-spread": "^6.16.0",
     "babel-preset-env": "0.0.6",
     "botstrap": "^0.16.3",
