@@ -1,5 +1,9 @@
 
 
+export const ID_REGEX = /^\d+$/;
+export const ZERO_CENTS_REGEX = /\.0{1,2}$/;
+export const USER_ID_REGEX = /^<@(U[A-Z0-9]+)>$/;
+
 export const DEFAULT_CURRENCY = 'CAD';
 export const STATUSES = {
   UNACCEPTED: 'unaccepted',
@@ -13,6 +17,12 @@ export const STATUSES = {
   COMPLETED: 'completed',
   APPEALED: 'appealed',
 };
+export const ERROR_STATUSES = [
+  STATUSES.REJECTED,
+  STATUSES.CANCELLED,
+  STATUSES.EXPIRED,
+  STATUSES.APPEALED,
+];
 export const KINDS = {
   TAKE: 'take',
   ACCEPT: 'accept',

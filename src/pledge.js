@@ -1,13 +1,22 @@
-import { camelizeKeys } from 'humps';
 import _ from 'lodash';
 
 import logger from './logger';
-import { DEFAULT_CURRENCY, KINDS, STATUSES, MESSAGES } from './constants';
+import {
+  DEFAULT_CURRENCY,
+  KINDS,
+  STATUSES,
+  MESSAGES,
+  USER_ID_REGEX,
+  ID_REGEX,
+  ERROR_STATUSES,
+} from './constants';
 import {
   pre,
   userIdToName,
-  getWagerStatusDescription,
   getWagerDescription,
+  getUserIdFromStr,
+  getUser,
+  getUsers,
 } from './slackUtils';
 import Api from './api';
 
@@ -19,27 +28,14 @@ const {
 } = new Api({ logger });
 
 
-const ID_REGEX = /^\d+$/;
 const MESSAGE_REGEX = /^(?:I )?(?:@?pledge|<@U1V3QU2BU>) (.+)$/i;
 // The second option is a unicode double dash
 const OPTION_REGEX = /^(--|—)/;
-const USER_ID_REGEX = /^<@(U[A-Z0-9]+)>$/;
 const OFFER_REGEX_STRING = '(?:"([\\w ]+)"|(\\d+(?:\\.\\d{2})?))([A-Z]{3})?';
 const PLEDGE_REGEX = new RegExp(
   `^${OFFER_REGEX_STRING}#${OFFER_REGEX_STRING}(?: that)? (.+)$`, 'i'
 );
-
-const USEFUL_USER_KEYS = ['name', 'real_name', 'id'];
-
-
-export const STATUSES_ARRAY = _.values(STATUSES);
-
-const ERROR_STATUSES = [
-  STATUSES.REJECTED,
-  STATUSES.CANCELLED,
-  STATUSES.EXPIRED,
-  STATUSES.APPEALED,
-];
+const STATUSES_ARRAY = _.values(STATUSES);
 const KIND_PRESENT_PERFECT_TENSES = {
   [KINDS.TAKE]: 'taken',
   [KINDS.CANCELLED]: 'cancelled',
@@ -132,13 +128,6 @@ const MESSAGE_FUNCTIONS = {
  */
 const getIdFromStr = str => str && ((str.match(ID_REGEX) || [])[0] || null);
 
-/**
- * If str is a user id string from slack, i.e. wrapped in angle brackets,
- * return the user id inside, else return null.
- */
-const getUserIdFromStr = str =>
-  str && ((str.match(USER_ID_REGEX) || [])[1] || null);
-
 const requiresId = handler => (options) => {
   const args = options.argString && options.argString.split(' ');
   if (!args || args.length === 0 || !args[0]) {
@@ -180,7 +169,10 @@ const userInvoledInWager = ({ user }) => wager =>
 const handleAll = ({ sendReply, userNameMap }) =>
   getWagers({ filters: [(wager => !ERROR_STATUSES.includes(wager.status))] })
     .then(wagers => sendReply(
-      wagers.map(getWagerStatusDescription({ userNameMap })).join('\n')
+      wagers.map(getWagerDescription({
+        userNameMap,
+        showStatus: true,
+      })).join('\n')
         || MESSAGE_FUNCTIONS.noResults()
     )).catch(handleReqestError({ sendReply }));
 
@@ -271,14 +263,11 @@ const handleFilter = (filters) => {
     }
   });
   const errorQualifierText = getErrorQualifierText(filters);
-  const descriptionFunction = showStatus
-    ? getWagerStatusDescription
-    : getWagerDescription;
   const filterHandler = ({ sendReply, userNameMap, fullName, usersName }) =>
     getWagers({ filters:
       filterMakers.map(filterMaker => filterMaker({ fullName, usersName })),
     }).then(wagers => sendReply(
-        wagers.map(descriptionFunction({ userNameMap })).join('\n')
+        wagers.map(getWagerDescription({ userNameMap, showStatus })).join('\n')
           || MESSAGE_FUNCTIONS.noResults(errorQualifierText)
       )).catch(handleReqestError({ sendReply }));
   if (filters.includes(FILTER_DETAILS.USER.name)) {
@@ -303,12 +292,10 @@ export default function pledge(message, users, response) {
   const firstArg = args[0];
 
   const userId = message.user;
-  const user = camelizeKeys(_.pick(users[userId], USEFUL_USER_KEYS));
+  const user = getUser({ users, id: userId });
   const fullName = user.realName;
   // const tag = user.name;
-  const userNameMap = _.values(users).map(
-    u => camelizeKeys(_.pick(u, USEFUL_USER_KEYS))
-  );
+  const userNameMap = getUsers(users);
 
   const commandNames = _.keys(COMMAND_DETAILS);
   for (let i = 0; i < commandNames.length; i += 1) {
