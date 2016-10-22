@@ -9,12 +9,14 @@ import {
   getWagerStatusDescription,
   getWagerDescription,
 } from './slackUtils';
-import {
+import Api from './api';
+
+const {
   createOperation,
-  handleReqestError,
-  getWagers,
   getWager,
-} from './api';
+  getWagers,
+  handleReqestError,
+} = new Api({ logger });
 
 
 const ID_REGEX = /^\d+$/;
@@ -63,11 +65,15 @@ const COMMAND_DETAILS = {
     name: KINDS.TAKE,
     aliases: [],
     flag: 't',
+    followUp: ({ wagerId }) =>
+      `The wager can be confirmed by saying: ${pre(`pledge accept ${wagerId}`)}`,
   },
   [KINDS.ACCEPT]: {
     name: KINDS.ACCEPT,
     aliases: ['affirm'],
     flag: 'a',
+    followUp: ({ wagerId }) =>
+      `The wager can be closed by saying: ${pre(`pledge close ${wagerId}`)}`,
   },
   [KINDS.REJECT]: {
     name: KINDS.REJECT,
@@ -83,6 +89,8 @@ const COMMAND_DETAILS = {
     name: KINDS.CLOSE,
     aliases: ['complete', 'finish'],
     flag: 'l',
+    followUp: ({ wagerId }) =>
+      `The wager can be appaeled by saying: ${pre(`pledge appeal ${wagerId}`)}`,
   },
   [KINDS.APPEAL]: {
     name: KINDS.APPEAL,
@@ -154,10 +162,16 @@ const requiresUser = handler => (options) => {
   return handler({ usersName, ...options });
 };
 
+const makeCreatedOperationHandler = ({ sendReply, kind }) => operation =>
+  sendReply(MESSAGE_FUNCTIONS.operationSuccess(kind) +
+            (COMMAND_DETAILS[kind].followUp
+              ? COMMAND_DETAILS[kind].followUp(operation)
+              : ''));
+
 const makeOperationHandler = ({ kind }) =>
   requiresId(({ sendReply, id, fullName }) =>
     createOperation({ operation: { kind, wagerId: id, user: fullName } })
-      .then(() => sendReply(MESSAGE_FUNCTIONS.operationSuccess(kind)))
+      .then(makeCreatedOperationHandler({ sendReply, kind }))
       .catch(handleReqestError({ sendReply, kind })));
 
 const userInvoledInWager = ({ user }) => wager =>
@@ -171,7 +185,7 @@ const handleAll = ({ sendReply, userNameMap }) =>
     )).catch(handleReqestError({ sendReply }));
 
 const handleShow = requiresId(({ sendReply, userNameMap, id }) =>
-  getWager({ id })
+  getWager(id)
     .then(wager => sendReply(getWagerDescription({ userNameMap })(wager)))
     .catch(handleReqestError({ sendReply })));
 

@@ -4,7 +4,6 @@ import { DEFAULT_CURRENCY } from './constants';
 
 
 const ZERO_CENTS_REGEX = /\.0{1,2}$/;
-
 const CURRENCY_EMOJI_MAP = {
   CAD: ':flag-ca:',
   USD: ':flag-us:',
@@ -15,22 +14,22 @@ const CURRENCY_EMOJI_MAP = {
 /**
  * Removes a period followed by one or two zeroes from the end of str.
  */
-const stripZeroCents = str => str && str.replace(ZERO_CENTS_REGEX, '');
+export const stripZeroCents = str => str && str.replace(ZERO_CENTS_REGEX, '');
 
 /**
  * Slack italicization markup
  */
-const italic = str => str && `_${str}_`;
+export const italic = str => str && `_${str}_`;
 
 /**
  * Slack boldicization markup
  */
-const bold = str => str && `*${str}*`;
+export const bold = str => str && `*${str}*`;
 
 /**
  * Slack codeicization markup
  */
-const pre = str => str && `\`${str}\``;
+export const pre = str => str && `\`${str}\``;
 
 /**
  * Accepts a currency code as per ISO 4217. If it is the default currency,

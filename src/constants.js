@@ -29,6 +29,5 @@ export const MESSAGES = {
   MISSING_USER_ARGUMENT: 'You must specify a @user',
   NON_EXISTENT_USER: 'That user is not in this team.',
   MALFORMED_PLEDGE: 'Sorry, I couldn\'t understand that pledge.',
-  PROPOSE_FAILURE: 'Sorry, the backend didn\'t like that wager',
   INVALID_COMMAND: 'That is not a valid command.',
 };
