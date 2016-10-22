@@ -32,6 +32,10 @@ export const KINDS = {
   APPEAL: 'appeal',
   PROPOSE: 'propose',
 };
+export const KIND_PRESENT_PERFECT_TENSES = {
+  [KINDS.TAKE]: 'taken',
+  [KINDS.CANCELLED]: 'cancelled',
+};
 export const MESSAGES = {
   PROPOSE_SUCCESS: 'You\'ve created a wager!',
   SERVER_FAILURE: '/shrug Sorry, something went wrong.',

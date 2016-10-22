@@ -55,6 +55,11 @@ const fetchWrapper = ({ url, data, logger }) => {
 };
 
 
+/**
+ * This class wraps all of the interactions with the backend. It is a class
+ * rather than merely a module so that the methods can use an external logging
+ * provider without it having to be passed in to every method call.
+ */
 export default class Api {
   constructor({ logger }) {
     this.logger = logger || console;
