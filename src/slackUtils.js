@@ -11,7 +11,7 @@ import {
 const CURRENCY_EMOJI_MAP = {
   CAD: ':flag-ca:',
   USD: ':flag-us:',
-  SZL: ':szl:',
+  SZL: ':soylent:',
   BYR: ':beer:',
 };
 const homoglyphReplacements = [
